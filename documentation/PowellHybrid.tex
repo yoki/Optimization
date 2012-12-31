@@ -1,0 +1,673 @@
+\documentclass[12pt]{article}
+\usepackage{amssymb, amsmath,algorithmic,algorithm,natbib}
+
+% \usepackage[dvipdfm,bookmarks=true,bookmarksnumbered=false,bookmarkstype=toc,hyperfootnotes=false, citebordercolor={1 1 1} ,linkbordercolor={1 1 1} ]{hyperref}
+
+\def\d{{\mathrm{d}}}
+\def\E{{\mathrm{E}}}
+\def\Var{{\mathrm{Var}}}
+\def\Cov{{\mathrm{Cov}}}
+\def\max#1{{\underset{#1}{\mathrm{max}}}}
+\def\min#1{{\underset{#1}{\mathrm{min}}}}
+\def\({\left(}
+\def\){\right)}
+\def\R{{\mathbb{R}}}
+\def\pdiff#1#2{\frac{\partial #1}{\partial #2}}
+\def\xb{{\mathbf{x}}}
+\def\fb{{\mathbf{f}}}
+\def\nub{{\mathbf{\nu}}}
+\def\gb{{\mathbf{g}}}
+\def\gammab{{\mathbf{\gamma}}}
+\def\pb{{\mathbf{p}}}
+\def\db{{\mathbf{d}}}
+\def\0{{\mathbf{0}}}
+\def\1b{{\mathbf{1}}}
+\def\deltab{{\boldsymbol{\delta}}}
+\newcommand{\Gammab}{{\mathbf{\Gamma}}}
+\newcommand{\be}{\begin{equation}}
+\newcommand{\ee}{\end{equation}}
+\setlength{\oddsidemargin}{0 in}
+\setlength{\evensidemargin}{0 in}
+\setlength{\textwidth}{6.5 in}
+\setlength{\topmargin}{-.5 in}
+\setlength{\textheight}{9 in}
+
+\pagestyle{plain}
+\begin{document}
+
+\begin{center}
+ {\Large A manual for the Modified Powell's Hybrid Method} {\large by Yoki Okawa }\\[0.5cm]
+ {\large \today}\\[0.5cm]
+\end{center}
+
+\section{Introduction}
+
+
+In this document, I explain the modified Powell's Hybrid method to solve system of nonlinear
+equations. I picked this algorithm because i) high quality code is available and ii) this method
+seems ``the method'' used in almost all packages I checked so far. It includes IMSL, NAG, Matlab,
+and Octave. The algorithm is based on \cite{Powell1970, Powell1970a}. Modified version of this
+algorithm is implemented in MINPACK, a high quality optimization package in public
+domain\footnote{You can access MINPACK from http://www.netlib.org/minpack/ }. It is implemented in
+Fortran 77 without detail of the algorithm. 
+
+This document is intended to provide the code and explanation at a same time. There are many good
+explanation of the idea behind this algorithm. For example, see \cite{NocedalWright2000}. Also,
+there are high quality code like MINPACK. But it is hard to connect two. So I am trying to build a
+bridge between algorithm and code. 
+
+\section{Basic Idea}
+For the basic idea of trust region method and nonlinear optimization in general,
+\cite{NocedalWright2000} provide readable yet detailed explanation. 
+
+We consider a following problem.
+\[
+\begin{pmatrix}
+f_1(x_1,\dots,x_n)\\
+f_2(x_1,\dots,x_n) \\
+\vdots\\
+f_n(x_1,\dots,x_n) \\
+\end{pmatrix}
+= 
+\begin{pmatrix}
+0\\
+0 \\
+\vdots\\
+0\\
+\end{pmatrix}
+\]
+Or, equivalently,
+\be \label{eq:prob}
+\fb (\xb) = \0.
+\ee
+
+Instead of solving the equation directly, we consider the minimization of the residual function
+\[
+r(\xb) = \|\fb(\xb)\|^2 = \sum_{i=1}^n f_i(\xb)^2
+\]
+
+The nonlinear equations are	solved by repeatedly solving the locally Quadratic approximation of
+the minimization problem of $r(\xb)$ around the point $\xb_i$: 
+
+\be \label{eq:unconditionalQuadratic}
+\min{\pb} \left[ r(\xb_i) + \tilde{\pb}^T J^T\fb(\xb_i)  + 
+		\frac{1}{2} \pb^T J^T(\xb_i) J(\xb_i)\pb\right] 
+\ee
+where $J$ is a Jacobian matrix and
+\[
+J_{kj} =\pdiff{f_k(\xb)}{x_j} 
+\]
+The nice point here is that we do not explicitly calculate the Hessian of $r(\xb)$ because its
+functional form of the sum of the square implies simple form of the Hessian, $ J^T(\xb_i)
+J(\xb_i)$
+The solution of the problem is
+\[
+\pb = - J^{-1}\fb(x_i),\qquad \xb _{i+1} = \xb_i + \pb_i
+\]
+This is the Newton-Raphson algorithm. 
+
+Newton-Raphson update can fail spectacularly when Jacobian changes fast. For illustration, let's
+consider one dimensional problem $f(x) = x^3+1$. It has a unique solution at $x = -1 $. However,
+if we start from $x_0=0.01$, $x_1 $ is 3090. It is not approaching to the true solution at all.
+Why the Newton Raphson failed? Since $f'(0.01) = 0.003$, the algorithm thinks $f(x)$ does not
+respond sharply with the change $x$. And $f(0.01)$ is $ 1.0303$, which is not too close to zero. So
+the algorithm thinks it has to take a large step to make $f(x)$ zero.  Note that if $f(x)$ comes
+from a first order condition of a objective function, the original objective function is strictly
+concave because its first derivative is strictly increasing.
+
+
+The problem is that the Newton-Raphson algorithm is taking locally Quadratic approximation too
+seriously. The approximation is valid for the region such that Jacobian is not moving too fast. In
+our example, $f'(-0.1) = 0.3$, which is more hundred times larger than the case of $x=0.01$. So it
+is not good idea to move $x$ by three thousands. We can restrict the step size to solve the
+problem.  We modify \eqref{eq:unconditionalQuadratic} by the following manner:
+\begin{align}
+\min{\pb} &\left[ r(\xb_i) + \tilde{\pb}^T J^{T}\fb(\xb)  + 
+	\frac{1}{2} \pb^T J^T(\xb_i) J(\xb_i)\pb\right] 
+\label{eq:conditionalQuadratic} \\
+&\mathrm{subject \ to}\qquad \|\pb\| \le \Delta
+\end{align}
+$\Delta$ is our parameter for the size of the region we trust the quadratic approximation. We
+adjust $\Delta$ smartly (details below). 
+
+
+
+\section{Algorithm}
+\subsection{Overview}
+This is a basic component of the algorithm. 
+\begin{algorithm}[ht]
+\caption{Main Algorithm (Subroutine Hybrid())}
+\label{al:main}
+\begin{algorithmic}[1]
+\STATE Set Initial Value of $\Delta$ and $J$
+\STATE Do QR Decomposition of $J$: $QR = J$
+\WHILE{$\text{abs}(F(\xb))>tol$}
+	\STATE Calculate $\pb$ given $Q,R$ and $\Delta$ 
+	\IF{$F(\xb+\pb)<F(\xb)$} \label{ln:improvedF}
+		\STATE $\xb\leftarrow \xb+\pb$
+		\STATE Calculate $\fb(\xb+\pb)$
+	\ENDIF
+	\STATE Update $\Delta$ using $F(\xb+\pb),F(\xb),J\pb$
+	\STATE Update $J$ using $f(\xb)$
+	\STATE Update $Q,R$ using $J$
+%	\IF{$\frac{\|\fb(\xb)\|-\|\fb(\xb+\pb)\|}{\|\fb(\xb)\|-\|\fb(\xb)+J\xb\|}<0.1$}
+\ENDWHILE
+\end{algorithmic}
+\end{algorithm}
+First, we decompose the Jacobian as $J = QR$. 
+
+First step of the loop is finding the possible increment $\pb$. This is a compromise of Newton
+direction and steepest descents of $F(\xb)=\sum_{k=1}^Nf_k(\xb)^2$ called dogleg method.
+
+$\Delta $ is a size of trust region.  We adjust $\Delta$ based on how well the current Jacobian is
+fitting the data. We decrease $\Delta$ if current improvement is not as good as we hoped because
+it means our Jacobian is a poor proxy of the true nature of the objective function. We do not want
+to move a lot based on poor estimate.  
+
+Next, we update the Jacobian. We usually use Broyden's Rank 1 update for fast calculation. If last
+few step was bad move, it might imply Jacobian contains substantial errors. So we recalculate
+Jacobian in that case. Last step of the iteration is update of $Q, R$.  Because of their special
+structure, it is relatively fast. There are many exceptional exit of the program. We explain it at
+the end of algorithm section.
+
+\paragraph{Convergence} 
+This algorithm is designed so that if Newton method fails to improve the residual function
+$r(\xb)$, it chooses the Steepest Descent method with gradually smaller step length. A small step
+to the Steepest Descent direction always improves the objective function value. So the convergence
+to a some local optimal point is mathematically guaranteed. Mathematical theorem does not
+guarantees convergence in a reasonable time and precision. But this state-of-art algorithm pays
+special attention to rounding errors and speed. So it would also likely to converge in practice.
+
+
+
+\subsection{Update of $\pb$}
+ \begin{algorithm}[ht]
+\caption{Calculate  $\pb$, (subroutine dogleg)}
+ \label{al:dogleg}
+\begin{algorithmic}[1]
+\STATE INPUT: $R,Q,\Delta,\fb(\xb),\Psi$
+\STATE OUTPUT: $\pb$
+\STATE Calculate Newton Correction by solving $R\boldsymbol{\nu} = - Q^{T} \fb (\xb)$
+\IF{$\|\boldsymbol{\nu}\|\le \Delta$}
+	\STATE  Accept Newton Correction : $\pb \leftarrow \boldsymbol{\nu}$
+\ELSE
+	\STATE /* Try Steepest descent Correction */
+	\STATE Calculate steepest descent Correction: $\boldsymbol{g} = - (QR)^{T} \fb (\xb)$
+	\STATE Calculate the predicted bottom at the direction of $\boldsymbol{g}$:
+			 $\mu = \| \boldsymbol{g} \|^2 / \| QR\boldsymbol{g} \|^2$
+	\IF{$\mu \|\Psi^{-1} \gb\| \ge \Delta$} 
+		\STATE Move along Steepest descent correction $\pb = \Delta \gb/\|\gb\|$
+	\ELSE
+		\STATE /* Accept neither. Try linear combination */
+		\STATE Find $\theta$ such that $\|(1-\theta)\mu  \gb + \theta\Psi \nub \| = \Delta$
+		\STATE $\pb \leftarrow (1-\theta)\mu \gb + \theta \nub$
+	\ENDIF
+\ENDIF
+\end{algorithmic}
+\end{algorithm}
+
+This is an update of $\pb$ by solving \eqref{eq:conditionalQuadratic}. We do not solve the problem
+precisely because it takes time and gain is not that big. 
+
+First, we try the Newton Correction, which is unconditional solution of \eqref{eq:conditionalQuadratic}. Solution of the
+linear equation takes just $O(n^2)$ operation because $R$ is upper triangular matrix. We can apply
+successive substitutions. If it is not moving more than $\Delta$, that is the exact solution. 
+
+[Bad writing.]
+If not, we try the Steepest descent direction of $r(\xb)=\fb(\xb)^T\fb(\xb)$, which is $-J^T
+\fb(\xb)$. 
+In a usual Steepest Descent method (or more sophisticated algorithm like Conjugate
+gradient method or Quasi Newton method), we perform line search along the suggested direction to
+find minimum on the line. But we don't go for that because line search requires several
+evaluations of the objective function, which can be costly. Instead, we explores the special
+feature of $r(\cdot)$. Since $r(\cdot)$ is sum of squares, we can derive the Hessian without
+performing error prone finite difference. Namely, the Hessian is $J^TJ$. With Hessian and
+Jacobian, we can directly derive the minimum of a function that is a quadratic approximation of
+the objective function at the point, which is $\xb + \mu \gb$. In this way, we can avoid costly
+line search. If the minimum is outside of the permissible area, or $\mu \|\gb\| \ge \Delta$, we
+accept up to $\Delta$.
+
+If the minimum along $\gb$ is closer than $\Delta$, we move a bit to the $\nub$ too. We take a
+linear combination of both $\boldsymbol{\nu}$ and $\gb$ so that $\|\pb\| = \Delta$. This can be
+attained by setting
+\[
+\theta = \frac{\Delta^2 - \|\mu \gb \|^2}
+{(\nub-\mu\gb,\mu\gb)+\sqrt{\{(\nub,\mu\gb)-\Delta^2\}^2+\{\|\nu\|^2-\Delta^2\} \{\Delta^2-\|\mu\gb\|^2 \}}}
+\]
+
+\paragraph{Normalization}
+In this algorithm, it is important to normalize equations so that the problem would be well
+behaved. Instead of considering the constraint in \eqref{eq:conditionalQuadratic} as a ball, we
+can consider a eclipse constraint. 
+\[
+ \|\Psi \pb\| < \Delta
+\]
+where  $\Psi$ is a diagonal normalization matrix. Let $\Psi \pb = \tilde{\pb}$. The problem
+\eqref{eq:conditionalQuadratic} becomes
+\begin{align}
+\min{\tilde{\pb}} &\left[ r(\xb_i) +\tilde{\pb}^T\Psi^{-1} J^T\fb(\xb_i)  + 
+	\frac{1}{2} \tilde{\pb}^T \Psi^{-1}J^TJ\Psi^{-1}\tilde{\pb}\right] 
+\label{eq:conditionalQuadratic} \\
+&\mathrm{subject \ to}\qquad \|\tilde{\pb}\| < \Delta
+\end{align}
+The solution of the problem above, $\tilde{\pb}$ is equal to the solution of unconstrained dogleg
+problem with $\tilde{J} = J\Psi ^{-1}$. So the dogleg problem with normalization is follows:
+
+
+\begin{algorithm}[ht]
+\caption{Calculate  $\pb$ with normalization}
+ \label{al:delta}
+\begin{algorithmic}[1]
+\STATE INPUT: $R,Q,\Delta,\fb(\xb),\Psi $
+\STATE OUTPUT: $\pb$
+\STATE $ \tilde{R} \leftarrow R \Psi^{-1}$
+\STATE Apply algorithm \ref{al:dogleg}. Let its solution as $\tilde{\pb}$
+\STATE $\pb = \Psi^{-1} \tilde{\pb} $
+\end{algorithmic}
+\end{algorithm}
+
+
+
+\subsection{Revision of $\Delta$ and Recalculating $J$}
+Algorithm \ref{al:delta2} is a update of the trust region size, $\Delta$.
+
+
+\begin{algorithm}[ht]
+\caption{Update $\Delta$ (subroutine UpdateDelta)}
+\label{al:delta2}
+\begin{algorithmic}[1]
+\STATE Calculate predicted $f(\xb+ \delta)$: \ $\boldsymbol{\phi} = \fb(\xb)+ J\pb$
+\STATE Calculate Predicted $r(\xb +\delta)$: \  $\Phi =\|\boldsymbol{\phi}\|  $
+\IF{$\frac{r(\xb)- r(\xb+\pb)}{r(\xb)-\Phi} <0.1 $} \label{al:delta2:l1}
+	\STATE  Change of objective function is too small. Reduce $\Delta$ by $\Delta
+    \leftarrow DeltaSpeed\cdot \Delta$ \label{line1} 
+	\STATE GoodJacobian = 0
+	\STATE BadJacobian = BadJacobian + 1
+\ELSE
+	\STATE BadJacobian = 0
+	\STATE GoodJacobian = GoodJacobian +1 
+	\IF{GoodJacobian$ > 1$ OR $\frac{r(\xb)- r(\xb+\pb)}{r(\xb)-\Phi} >0.5 $}
+		\STATE $\Delta = \max{}(\Delta, 2\|\pb\| )$
+	\ELSIF{ abs$\big(\frac{r(\xb+\pb)-\Phi}{r(\xb)-\Phi}\big)< 0.1 $}
+		\STATE $\Delta =2\|\pb\| $
+	\ENDIF	
+\ENDIF
+\IF {BadJacobian = 2}
+	\STATE Recalculate Jacobian by forward differences.
+	\STATE BadJacobian = 0
+\ENDIF
+\end{algorithmic}
+\end{algorithm}
+
+Line \ref{al:delta2:l1} checks if $J$ is good or not. If $J$ is a good prediction,
+predicted reduction of the objective function $r(\xb)-\Phi $ is almost equal to the
+actual reduction. If the actual reduction is less than 10\% of the predicted reduction,
+there is something wrong with $J$. It is either $\fb(\xb)$ is very nonlinear or
+calculated $J$ contains too much error from the history. These errors generally becomes
+smaller if the trust region $\Delta$  shrinks.
+
+If the reduction is relatively satisfactory, we start to weakly increase $\Delta$. There is not
+too much justification for this increase. But Powell found that the result is numerically quite
+satisfactory. Note that usually $\|\pb\|$ is equal to $\Delta$.  We do not want to modify
+$\Delta$ all the time because we might fall into the oscillation of increase $\rightarrow$
+decrease $\rightarrow $ increase $\cdot \cdot \cdot$.  To avoid that, GoodJacobian is checking if
+it is first attempt to increase $\Delta$. If it is after second attempt to increase $\Delta$ and
+we attain modest increase in objective function, which is that actual reduction is more than 50\%
+of predicted reduction, we double the trust region. If our Jacobian is a pretty good estimate
+($r(\xb+\pb)-\Phi$ is small), we also expand the trust region.
+
+BadJacobian is counting number of consecutive failure of predicting changes in objective
+function. If the algorithm fails to predict the change twice consecutively, we suspect that
+current Jacobian contains serious error which came from previous updates. The previous points may
+be far from current $\xb$. We recalculate it based on forward difference from scratch, instead of
+updating it.
+
+\subsection{Update of J}
+We update Jacobian using the Broyden's rank 1 update. For the detail, see Numerical Recipes
+Ch. 9.7., Broyden's method.   :
+\begin{align*}
+  J \leftarrow J +\frac{1}{\|\pb\|^2} (\fb(\xb+\delta)-f(\xb) -J\pb )\pb^T
+\end{align*}
+
+
+
+\subsection{QR Decomposition}
+QR decomposition is decomposing a matrix $A$ to multiple of $Q$, orthogonal matrix ($Q^{-1}=Q^T$),
+and upper triangular matrix $R$. So $A=QR$. It is useful because solving $Ax=b$ takes $O(n^2)$
+step once we know QR decomposition of A, which is faster than $O(n^3)$. Although QR decomposition
+itself takes $O(n^3)$, once we calculate the decomposition, its update only takes $O(n^2)$. So it
+is useful when we have to solve the linear equation repeatedly with slightly different
+coefficients. It is the case when we calculate the Newton direction, which requires to solve
+$J\delta = \fb(\xb)$ in every iteration. In this subsection, I assume that input is square
+matrix. The fortran code is written in the way it accepts rectangular matrix.
+
+\subsubsection{Decomposition}
+This is called at first and whenever $J$ is recalculated using finite difference.  The code uses
+Householder transformation repeatedly. Let $a_j$ as an arbitrary vector and we want to find $P_j$
+such that $P_j$ is orthogonal and $P_ja_j = (b_1, 0, \dots,0)^T$. We can set
+\[
+P_j = I - \frac{2}{\|u_j\|^2} u_ju_j^T, \qquad u_j = a_j - \|a_j\|e_1
+\]
+where $I$ is identity matrix and $e_1= (1,0,\dots,0)^T$ is a unit vector. We can apply this
+repeatedly until all matrix becomes upper triangular. Many books about numerical algorithm covers
+QR decomposition with Householder transformation. 
+
+
+
+
+\subsubsection{Update}
+Update is called at the end of each iteration. Our goal is given
+\[
+A^{next} = A + uv^T, \qquad A = QR
+\]
+find $Q^{next}$ and $R^{next}$ such that $Q^{next}R^{next}=A^{next}$. For more information, see \cite{BjorckDahlquist2008}
+section 8.4. 
+
+\paragraph{transform a bit}
+Let $w=Q^Tu$. Using this, 
+\[
+A^{next} = Q^{next}(R+wv^T)
+\]
+We are going to make $R+wv^T$ upper triangular matrix using Givens transformation.
+
+\paragraph{Givens transformation of $w$}
+We find a sequence of Givens transformation such that 
+\[
+P_1\dots P_{n-1}w = \alpha e_1.
+\]
+Givens transformation is very similar to Jacobi transformation. It is a matrix defined by three
+parameters $(k,l,\theta)$ such that $(i,j)$
+element is 
+\[
+P(k,l,\theta)_{i,j} = \begin{cases}
+\cos \theta & i=j=k \\
+\cos \theta & i=j = l\\
+-\sin \theta & k = i , l = j \\
+\sin \theta & k = j, l=i \\
+1 & i = j \neq k, i = j \neq l\\
+0 & otherwise
+\end{cases}
+\]
+It is zero other than diagonal elements, $(k,l)$ element, and $(l,k)$ element. $P$ is orthogonal
+matrix.  Consider
+$P(n-1,n,\theta) w$.  $n$th element of $P(n-1,n,\theta) w$ is zero if
+\[
+\cos \theta = \frac{1}{\sqrt{t^2+1}}, \qquad
+\sin \theta = t \cos \theta, \qquad t = \frac{w_n}{w_{n-1}}
+\]
+We can repeat this until all element other than first element is zero. 
+Let 
+\[
+P^w = P_1\dots P_{n-1}
+\]
+
+\paragraph{Transform upper Hessenberg matrix to upper triangular matrix}
+Now,
+\[
+A^{next} = Q (P^w)^T(P^WR+P^wwv^T)
+\]
+Note that elements in $P^wwv^T$ is zero other than first row and $P^WR$ is upper Hessenberg
+matrix. So $P^WR+P^wwv^T$ is upper Hessenberg matrix. We are going to eliminate (1,2) elements to
+(n-1,n) elements using Givens transformation.  Let $H =P^WR+P^wwv^T$. To eliminate (1,2) element,
+we need Givens transformation such that
+\[
+\cos \theta = \frac{1}{\sqrt{t^2+1}}, \qquad
+\sin \theta = t \cos \theta, \qquad t = \frac{h_{21}}{w_{11}}
+\]
+We can repeat this until all lower triangular elements are zero. Let $P^H$ as the accumulation of
+the transformation. We complete the algorithm by 
+\[
+Q^{next} =  Q (P^w)^T(P^H)^T, \qquad R^{next} = P^H(P^WR+P^wwv^T)
+\]
+
+
+
+
+\subsection{Termination of the Algorithm}
+There are several conditions for the termination of this algorithm.
+
+\paragraph{Successful Convergence}
+ We call it successful if 
+\[
+\frac{1}{\sqrt{n}}\|\fb(\xb)\|=\sqrt{\frac{1}{n}\sum_{i=1}^m(f_i(\xb))^2} < ftol
+\]
+This means that average squared residual is small. If this condition is satisfied, $|\fb_i(\xb)|$
+is at most $n\cdot ftol1$
+
+\paragraph{Trust region size shrinks to the tolerance level}
+The program stops execution if $\Delta < xtol(\|\xb\|+xtol)$, the relative size of the trust
+region is smaller than $xtol$. This happens if the Jacobian changes rapidly and wildly around the
+point the program terminated. This is the most common type of unsuccessful termination. It can
+happen for the following reasons: 
+\begin{itemize}
+\item The problem you are going to solve has large second order derivatives. In this case,
+  Jacobian is sensitive to the where it is evaluated. The local quadratic approximation is
+  inappropriate. This might be the case if you have highly discontinuous Jacobian, for example.
+\item You set the $ftol$ too small. You might get this message even if the algorithm is in indeed
+  the solution. If $ftol$ is too small, the algorithm can not attain it with the precision
+  required.
+\item You set the speed of shrinking $\Delta$ too small. 
+\item Your subroutine to be solved contains bugs. My personal experience suggests this explains
+  most of the this error message. 
+\end{itemize} 
+
+Here are possible solutions:
+\begin{itemize}
+\item Check the $\fb(\xb)$ and see if it is small enough or not. 
+\item Increase \textit{DeltaSpeed}
+\item Increase \textit{ftol}
+\item Decrease $JacobianStep$
+\item Use different initial guesses
+\item If you are using single precision real numbers, use double precision instead. 
+\end{itemize}
+
+
+\paragraph{Too much function call}
+If number of function call exceeds MaxFunEval, the program stops the execution. 
+
+\paragraph{Algorithm reaches Local minima}
+If the program terminates for the reason other than ``Successful Convergence'', we recalculate the
+gradient of the objective function $\nabla r(\xb) = J^T\fb(\xb)$ by finite difference. If
+$\|\nabla r(\xb)\| < gtol(\|\xb\|+gtol)$, we are at the locally optimal point, although average
+residual is not close enough to zero in the tolerance required. This happens if the algorithm is
+captured in the local minima. The solution is trying the different initial guess. This can also
+happen if $ftol$ is too small to attain. You can check that by seeing the $\fb(\xb)$ at the
+output.  
+
+
+
+
+\section{Usage of the Subroutine}
+I explain inputs and outputs of this subroutine. Many arguments are optional. 
+\begin{description}
+	\item[fun] Subroutine which returns the residual vector. It should take two arguments, and
+      first argument should be $\xb$ and second argument should be the $\fb(\xb)$.
+	\item[x0] Initial value of $\xb$
+	\item[xout] Solution of the least square problem.
+	\item[info] (optional) Variable for the information of the termination of the algorithm. For
+      the detail of the conditions, see the Termination of the Algorithm. 
+	\begin{description}
+		\item[info = 0] Improper input values
+		\item[info = 1] Successful convergence. 
+		\item[info = 2] First order optimality satisfied
+		\item[info = 3] Trust region size shrinks to the tolerance level
+		\item[info = 4] Too much function call
+	\end{description}
+	\item[fvalout] (Optional) Output vector of residuals at $\xb = xout$.
+	\item[Jacobianout]  (Optional) Output Jacobian Matrix at $xout$
+	\item[xtol] (Optional) Tolerance of the x. If trust region size is smaller than
+      $xtol(\|\xb\|+xtol)$, the program terminates. If this is not provided, it would be set to
+      the default value of $10^{-8}$
+	\item[ftol] (Optional) Tolerance of the residual. The program terminates if
+      $\sqrt{\sum_{i=1}^m(f_i(\xb))^2/m} < ftol $. If this is not provided, it would be set to
+      the default value is $10^{-8}$.
+	\item[gtol] (Optional)  Tolerance of the gradient. If  $ \|\nabla r(\xb)\| <
+      gtol(\|\xb\|+gtol)$ holds, we regard it first order optimality is satisfied. The default
+      value is $10^{-8}$
+	\item[JacobianStep] (Optional) Relative step size for calculating the Jacobian by Finite
+      difference. Default value is $10^{-3}$. 
+	\item[display] (Optional) Option to specify the display preference. If display is 2, the
+      algorithm shows the iteration. If display is 0, the algorithm shows nothing. Default value
+      is 0. 
+	\item[maxFunctionCall] (Optional) Number of function to be called before
+      terminating the algorithm. Default value is $100n$, where $n$ is number of equations. 
+	\item[noupdate] (Optional) Dummy variable for the Broyden's rank 1 update. If noupdate is 1,
+      the algorithm recalculate Jacobian with finite difference in each iteration. This would
+      almost always make the algorithm converged with fewer iteration. But this does not mean it
+      would speed up in terms of CPU time because in general the calculation of the Jacobian is
+      costly if the evaluation of the objective function is costly or $n$ is large. Turning off
+      the update can speed up the total computation time when $n$ is very small, (say less than
+      5). Default value is 0, so the Broyden's update is the default.
+	\item[DeltaSpeed] (Optional) Controls the speed of $\Delta$ when it shrinks. In algorithm
+      \ref{al:delta2}, line \ref{line1}, the trust region size $\Delta$ shrinks if the actual
+      reduction do not match with predicted reduction. DeltaSpeed controls how fast it should
+      shrink. It should always be always less than one. The smaller the value is, the faster the
+      $\Delta$ shrinks. The default value is $1/4$.
+\end{description}
+
+
+
+\section{Other issues[badly written]}
+
+
+\subsection{Improving Performance}
+Current implementation prefer readability of the code to performance. If you are dealing with
+large scale problems, you might want to change some parts of the code. In general, this code is
+written for the case that number of parameters to be solved is not that large, (for example, less
+than 50) and evaluation of the objective function is costly. If this is not your problem, you
+might be able to get better performance for the following modifications.
+
+
+\paragraph{QR factorization} 
+Other than the evaluation of the objective function, $QR$ decomposition would take most of the
+time in this algorithm. It is called at first, and called occasionally afterwards if current
+approximation is suspected to contain substantial errors. If $n$ or $m$ is large (more than a few
+hundred $n$ or more than 10,000 $m$) and the evaluation of the objective function is not
+expensive, MINPACK's slow implementation of QR decomposition is likely to be a bottle neck. You
+should consider using high quality linear algebra package like LAPACK. Also, LAPACK routine would
+improve the numerical stability of QR decomposition. 
+
+\paragraph{Better solution of Locally quadratic problem}
+Also faster speed can be attained by improving the dogleg method to the nearly exact solution
+using Cholesky factorization. It takes more time than dogleg method per iteration. But improvement
+per iteration will be better. This appropriate when the evaluation of the function is costly and
+number of the variables are small.
+
+
+\paragraph{Memory}
+Current implementation prefer readability of the code to memory saving.  This should not be a
+concern for modern computers if $n$ is less than 1000. 
+
+If $n$ is larger than that, it might create a problem. This code stores a few $n$ by $n$
+matrixes. To give you an idea for how serious this constraint is, here is the memory required to
+store matrixes: To store a 1,000 by 1,000 matrix with 8 byte (double) precision, it requires 8
+Megabytes of memory. For 5,000 by 5,000 matrix, that is 190 Megabytes and for 10,000 by 10,000
+matrix, that is 762 Megabytes. In case memory binds, it is not too difficult to decrease the
+memory usage by 50\% or more with a little modification. For more memory savings, probably you
+need substantial rewrite of the code based on conjugate gradient method instead of Newton Based or
+use sparse matrix.
+
+
+\subsection{Comparison with various methods}
+Here is the comparison of various methods with this method. 
+
+\paragraph{Compared to Newton-Raphson method with BFGS, DFP, or BHHH} Great advantage of
+Newton-Raphson type method is its speed. But it is unstable, even if we update Jacobian/Hessian
+smartly using BFGS, DFP or BHHH. In fact, Newton Raphson method just has local convergence. It
+might fall into cycle or diverge even if the function is smooth and globally concave, unless the
+initial guess is sufficiently close to the true value. So here is the origin of the agony of
+initial guess. Also, Newton's method might take you to the saddle point. (see
+\cite{BjorckDahlquist2008} section 11.3 for more discussion) On the other hand, the modified
+Powell's Hybrid has global convergence property. It always converges if the first derivative is
+continuous and bounded, no matter what the initial point is. This is a great improvement in terms
+of convergence. For speed, the Hybrid method try to use Newton-Raphson update whenever it looks
+safe.The Hybrid method is as good as that in Newton-Raphson if the initial guess is good. If the
+initial guess is not so good, only the Hybrid method has guaranteed converges.
+
+\paragraph{Compared to Newton-Raphson/Conjugate Gradient with Line search} 
+(see \cite{BjorckDahlquist2008} section 11.3 for more discussion) To obtain global convergence,
+there are two ways. One is the trust region method which the Hybrid method is relied on, and the
+other is the line search method. They are different in what to do after we get the direction for
+the improvement. For line search, it searches the extremum along the direction. And trust region
+picks step size without function evaluation by local quadratic approximation.
+
+There are subtle difference between two algorithm. But i am not sure what it is. 
+
+\paragraph{Compared to Ameba/Downhill Simplex } Their advantage is an ability to deal with
+discontinuity. If the objective function contains severe discontinuities near the solution, you
+should consider this (or its improvement, i am sure it is in somewhere.). But it is very slow. My
+guess is that the Hybrid method is not that fragile to the mild discontinuity in both objective
+function and its derivative because of its trust region feature, although there is no mathematics
+or experiments to support the claim. I would try Hybrid method first because it is much
+faster. Sophisticated termination criterion might be fooled by the discontinuity so you might want
+to restart it once it converges.
+
+\paragraph{Compared to Grid Search/Simulated annealing}
+The global convergence property of the Hybrid method is that it would converge to local
+extrema. Like any derivative based method, it does not guarantees the global property of the point
+obtained. If there are many local extrema and you need a global solution, probably there is no
+choice other than Grid search or other globally convergent method like simulated annealing.
+
+\paragraph{Compared to bisection/Brent's method} If the problem contains only one equation, we
+have completely different algorithms. Bisection and its improvement, Brent's method, is regarded
+as robust algorithms which can be applied to highly discontinuous function. The problem is that it
+requires two initial guesses which brackets the solution. It is not always easy to find them. I am
+not sure if they are so robust or fast if we consider the step of finding the bracket.  The hybrid
+algorithm is faster than these algorithms with only one initial guess. But it may be trapped at
+the local extrema of the function. So it is your call to pick.
+
+\paragraph{Fixed point approach} \cite{SuJudd2008} is fiercely criticizing this approach. It
+makes some sense. But their solution, extensive usage of the canned package is not my taste. It is
+not so hard to understand the algorithm, once we have nice documentation. 
+
+
+\section{Glossary}
+Here, $\fb(\xb)$ is system of equations which we want to make it zero, and $F(\xb)$ is scalar
+objective function which we want to minimize. 
+\begin{description}
+	\item[Jacobian] Jacobian is a matrix of first order derivatives, which comes from a vector 
+	valued function. \[
+	J_{ij} =\pdiff{f_i(\xb))}{x_j}\qquad J = \begin{pmatrix}
+	\pdiff{f_1(\xb))}{x_1} & \cdots & \pdiff{f_1(\xb))}{x_n} \\
+	\vdots & \ddots & \vdots \\
+	\pdiff{f_n(\xb))}{x_1} & \cdots
+ & \pdiff{f_n(\xb))}{x_n} \\
+	 \end{pmatrix}
+	\]
+	\item[Gradient] Gradient is a vector of first order derivatives, which comes from a scalar
+      valued function. This is another name of first order conditions.  $\bigtriangledown F(\xb) =
+      (\pdiff{F(\xb))}{x_1},\dots,\pdiff{F(\xb))}{x_N} )$
+	\item[Hessian] Hessian is a matrix of second order derivatives, which comes from a scalar
+      valued function.  $H = \bigtriangledown^2 F(\xb) =\bigtriangleup F(\xb)$. $
+      H_{ij}=\frac{\partial^2 F(\xb)}{\partial x_i \partial x_j}$. Hessian is symmetric and
+      positive semidefinite.  
+	\item[Hessian and Jacobian] Since optimization problem is same as finding zero in the first
+      order conditions, Hessian of the objective function is Jacobian of first order
+      conditions. But Jacobian from the first order conditions behaves better than ordinary
+      Jacobian, because Hessian has several special features. Many variant of the Newton-Raphson
+      algorithm exploit the fact for efficient algorithm. 
+	\item[Newton-Raphson algorithm] This algorithm is both for solving a system of nonlinear
+      equations and optimization. If it is applied for solving a system of nonlinear equations, it
+      uses locally linear approximation of the equations. Linear approximation requires slope,
+      which is Jacobian. If it is applied for optimization problem, it uses locally linear
+      approximation to the first order conditions. Jacobian of the first order conditions is
+      Hessian. So it requires Hessian.
+	\item[BFGS/DFP update] Smart way to calculate Hessian in Newton Raphson algorithm for
+      optimization. BFGS update is weakly better than DFP update in a sense that BFGS and DFP
+      performs almost identically for most of the problems and there are some cases BFGS is
+      clearly better than DFP update.  
+	\item[BHHH update] Another smart way to calculate Hessian in Newton Raphson algorithm for
+      maximum likelihood problems. Although this is popular for econometricians, plain vanilla
+      implementation of BHHH update is usually inferior to BFGS/DFP update. 
+	\item[Gauss-Newton's algorithm] Yet another smart way to calculate Hessian applicable to
+      nonlinear least square problem.
+	\item[Steepest Descent algorithm/Cauchy algorithm] This algorithm is for solving a
+      optimization problem. It simply picks a direction which is inverse of gradient. If step size
+      is sufficiently small, it always improves the value of the objective function. For the
+      determination of step size, line search is usually used. It is also called the Cauchy
+      algorithm. 
+\end{description}
+
+\bibliographystyle{aer}
+\bibliography{C:/dbox/pdf/bib/myref}
+\end{document}
