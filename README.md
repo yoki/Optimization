@@ -18,8 +18,4 @@ What it does
 
 Licence
 -------
- Copyright (C) 2012 Yohei Okawa <okaway+licence@gmail.com>
-
-   TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION
-
-  0. You are free to do anything with this code. 
+MIT
