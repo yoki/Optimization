@@ -13,9 +13,9 @@ What it does
 
 Motivation
 ----------
-I spent enough time wondering why my model doesn't converge, using Matlab's fsolve or other black-box functions for optimization. It is one thing that my model doesn't converge, but it is quite another thing that I don't have a clue for the reason of non-convergence. Error messages did't make sense. I realized that I have to open the black-box. 
+Canned optimization packages are useful when it works. But when it doesn't, I can do very little. Error messages did't make sense. I didn't have a clue for the reason of non-convergence. I realized that I have to open the can. 
 
-However, it wasn't as easy as I expected, as I couldn't connect the codes and textbooks on the computation. There are a lot of good books (e.g. Numerical Optimization by Jorge Nocedal and Stephen Wright) for optimization and non-linear equations solver. There are also some public domain or open source codes for optimization (e.g. MINPACK in Fortran or Apache Commons for Java). I want a package seriously documented with equations. In this package, symbols and subroutine structure in the documentation exactly match with code. So it is easier to read code. 
+The challenge of opening the can is not about code itself. It is about documentations which closely follows the code. Comments in the code are usually not enough because we need to understand derivations of formulas and intutions behind the formulas. This packages provides serious documentation. Symbols and subroutine structure in the documentation exactly match with code. 
 
 
 Licence
